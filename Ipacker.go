@@ -1,8 +1,7 @@
 package network
 
-import "io"
-
 type IPacker interface {
-	Pack(message *Message) ([]byte, error)
-	Unpack(reader io.Reader) (*Message, error)
+	Pack(msgID uint16, msg interface{}) ([]byte, error)
+	Read(*TcpConnX) ([]byte, error)
+	Unpack([]byte) (*Message, error)
 }

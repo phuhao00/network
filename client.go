@@ -1,68 +1,97 @@
 package network
 
 import (
-	"encoding/binary"
-	"fmt"
+	"github.com/phuhao00/spoor"
 	"net"
+	"runtime/debug"
+	"sync/atomic"
 )
 
 type Client struct {
-	Address   string
-	packer    IPacker
-	ChMsg     chan *Message
-	OnMessage func(message *ClientPacket)
+	*TcpConnX
+	Address         string
+	ChMsg           chan *Message
+	OnMessageCb     func(message *Packet)
+	logger          *spoor.Spoor
+	bufferSize      int
+	running         atomic.Value
+	OnCloseCallBack func()
+	closed          int32
 }
 
-func NewClient(address string) *Client {
-	return &Client{
-		Address: address,
-		packer: &NormalPacker{
-			ByteOrder: binary.BigEndian,
-		},
-		ChMsg: make(chan *Message, 1),
+func NewClient(address string, connBuffSize int, logger *spoor.Spoor) *Client {
+	client := &Client{
+		bufferSize: connBuffSize,
+		Address:    address,
+		logger:     logger,
+		TcpConnX:   nil,
 	}
+	client.running.Store(false)
+	return client
+}
+
+func (c *Client) Dial() (*net.TCPConn, error) {
+	tcpAddr, err := net.ResolveTCPAddr("tcp4", c.Address)
+
+	if err != nil {
+		return nil, err
+	}
+
+	conn, err := net.DialTCP("tcp6", nil, tcpAddr)
+
+	if err != nil {
+		return nil, err
+	}
+
+	return conn, nil
 }
 
 func (c *Client) Run() {
-	conn, err := net.Dial("tcp6", c.Address)
+	conn, err := c.Dial()
 	if err != nil {
-		fmt.Println(err)
+		c.logger.ErrorF("%v", err)
 		return
 	}
-	go c.Read(conn)
-	go c.Write(conn)
-
-}
-
-func (c *Client) Write(conn net.Conn) {
-	for {
-		select {
-		case msg := <-c.ChMsg:
-			c.Send(conn, msg)
-		}
-	}
-}
-
-func (c *Client) Send(conn net.Conn, message *Message) {
-	pack, err := c.packer.Pack(message)
+	tcpConnX, err := NewTcpConnX(conn, c.bufferSize, c.logger)
 	if err != nil {
-		//fmt.Println(err)
+		c.logger.ErrorF("%v", err)
 		return
 	}
-	conn.Write(pack)
+	c.TcpConnX = tcpConnX
+	c.Impl = c
+	c.Reset()
+	c.running.Store(true)
+	go c.Connect()
 }
 
-func (c *Client) Read(conn net.Conn) {
-	for {
-		message, err := c.packer.Unpack(conn)
-		if err != nil {
-			//fmt.Println(err)
-			continue
+func (c *Client) OnClose() {
+	if c.OnCloseCallBack != nil {
+		c.OnCloseCallBack()
+	}
+	c.running.Store(false)
+	c.TcpConnX.OnClose()
+}
+
+func (c *Client) OnMessage(data *Message, conn *TcpConnX) {
+
+	c.Verify()
+
+	defer func() {
+		if err := recover(); err != nil {
+			c.logger.ErrorF("[OnMessage] panic ", err, "\n", string(debug.Stack()))
 		}
-		c.OnMessage(&ClientPacket{
-			Msg:  message,
-			Conn: conn,
-		})
-		fmt.Println("read msg:", string(message.Data))
+	}()
+
+	c.OnMessageCb(&Packet{
+		Msg:  data,
+		Conn: conn,
+	})
+}
+
+// Close 关闭连接
+func (c *Client) Close() {
+	if atomic.CompareAndSwapInt32(&c.closed, 0, 1) {
+		c.Conn.Close()
+		close(c.stopped)
 	}
 }
