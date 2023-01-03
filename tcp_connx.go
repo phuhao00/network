@@ -35,6 +35,7 @@ type TcpConnX struct {
 	msgParser   *BufferPacker
 	msgBuffSize int
 	logger      *spoor.Spoor
+	dispatch    chan *Message
 }
 
 func NewTcpConnX(conn *net.TCPConn, msgBuffSize int, logger *spoor.Spoor) (*TcpConnX, error) {
@@ -317,4 +318,9 @@ func (c *TcpConnX) OnConnect() {
 
 func (c *TcpConnX) OnClose() {
 	c.logger.InfoF("[OnConnect] 断开连接 local:%s remote:%s", c.LocalAddr(), c.RemoteAddr())
+}
+
+// SetDispatch  ...  set dispatch
+func (c *TcpConnX) SetDispatch(dispatch chan *Message) {
+	c.dispatch = dispatch
 }

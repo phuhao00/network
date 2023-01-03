@@ -60,7 +60,7 @@ func (p *BufferPacker) SetMsgLen(lenMsgLen int32, minMsgLen uint32, maxMsgLen ui
 }
 
 // Read goroutine safe
-func (p *BufferPacker) Read(conn *TcpConnX) ([]byte, error) {
+func (p *BufferPacker) Read(conn ConnReal) ([]byte, error) {
 
 	p.recvBuff.EnsureWritableBytes(p.lenMsgLen)
 
@@ -108,7 +108,7 @@ func (p *BufferPacker) Read(conn *TcpConnX) ([]byte, error) {
 }
 
 // goroutine safe
-func (p *BufferPacker) Write(conn *TcpConnX, buff ...byte) error {
+func (p *BufferPacker) Write(conn ConnReal, buff ...byte) error {
 	// get len
 	msgLen := uint32(len(buff))
 
