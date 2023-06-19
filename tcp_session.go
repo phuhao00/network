@@ -3,6 +3,7 @@ package network
 import (
 	"encoding/binary"
 	"fmt"
+	"github.com/phuhao00/spoor"
 	"io"
 	"net"
 	"reflect"
@@ -11,20 +12,14 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/phuhao00/spoor"
+	"github.com/phuhao00/spoor/logger"
 )
-
-type IConn interface {
-	OnConnect()
-	OnClose()
-	OnMessage(*Message, *TcpConnX)
-}
 
 const timeoutTime = 30 // 连接通过验证的超时时间
 
-type TcpConnX struct {
+type TcpSession struct {
 	Conn        net.Conn
-	Impl        IConn
+	Impl        IService
 	ConnID      int64
 	verify      int32
 	closed      int32
@@ -34,11 +29,10 @@ type TcpConnX struct {
 	wgRW        sync.WaitGroup
 	msgParser   *BufferPacker
 	msgBuffSize int
-	logger      *spoor.Spoor
 }
 
-func NewTcpConnX(conn *net.TCPConn, msgBuffSize int, logger *spoor.Spoor) (*TcpConnX, error) {
-	tcpConn := &TcpConnX{
+func NewTcpSession(conn *net.TCPConn, msgBuffSize int, logger *spoor.Spoor) (*TcpSession, error) {
+	tcpConn := &TcpSession{
 		closed:      -1,
 		verify:      0,
 		stopped:     make(chan bool, 1),
@@ -47,7 +41,6 @@ func NewTcpConnX(conn *net.TCPConn, msgBuffSize int, logger *spoor.Spoor) (*TcpC
 		Conn:        conn,
 		msgBuffSize: msgBuffSize,
 		msgParser:   newInActionPacker(),
-		logger:      logger,
 	}
 	// Try to open keepalive for tcp.
 	err := conn.SetKeepAlive(true)
@@ -74,7 +67,7 @@ func NewTcpConnX(conn *net.TCPConn, msgBuffSize int, logger *spoor.Spoor) (*TcpC
 	return tcpConn, nil
 }
 
-func (c *TcpConnX) Connect() {
+func (c *TcpSession) Connect() {
 	if atomic.CompareAndSwapInt32(&c.closed, -1, 0) {
 		c.wgRW.Add(1)
 		go c.HandleRead()
@@ -88,7 +81,7 @@ L:
 		// 等待通到返回 返回后检查连接是否验证完成 如果没有验证 则关闭连接
 		case <-timeout.C:
 			if !c.Verified() {
-				c.logger.ErrorF("[Connect] 验证超时 ip addr %s", c.RemoteAddr())
+				logger.Error("[Connect] 验证超时 ip addr %s", c.RemoteAddr())
 				c.Close()
 				break L
 			}
@@ -101,10 +94,10 @@ L:
 	c.Impl.OnClose()
 }
 
-func (c *TcpConnX) HandleRead() {
+func (c *TcpSession) HandleRead() {
 	defer func() {
 		if err := recover(); err != nil {
-			c.logger.ErrorF("[HandleRead] panic ", err, "\n", string(debug.Stack()))
+			logger.Error("[HandleRead] panic ", err, "\n", string(debug.Stack()))
 		}
 	}()
 	defer c.Close()
@@ -115,7 +108,7 @@ func (c *TcpConnX) HandleRead() {
 		data, err := c.msgParser.Read(c)
 		if err != nil {
 			if err != io.EOF {
-				c.logger.ErrorF("read message error: %v", err)
+				logger.Error("read message error: %v", err)
 			}
 			break
 		}
@@ -124,10 +117,10 @@ func (c *TcpConnX) HandleRead() {
 	}
 }
 
-func (c *TcpConnX) HandleWrite() {
+func (c *TcpSession) HandleWrite() {
 	defer func() {
 		if err := recover(); err != nil {
-			c.logger.ErrorF("[HandleWrite] panic", err, "\n", string(debug.Stack()))
+			logger.Error("[HandleWrite] panic", err, "\n", string(debug.Stack()))
 		}
 	}()
 	defer c.Close()
@@ -137,23 +130,23 @@ func (c *TcpConnX) HandleWrite() {
 		case signal := <-c.signal: // 普通消息
 			data, ok := signal.([]byte)
 			if !ok {
-				c.logger.ErrorF("write message %v error: msg is not bytes", reflect.TypeOf(signal))
+				logger.Error("write message %v error: msg is not bytes", reflect.TypeOf(signal))
 				return
 			}
 			err := c.msgParser.Write(c, data...)
 			if err != nil {
-				c.logger.ErrorF("write message %v error: %v", reflect.TypeOf(signal), err)
+				logger.Error("write message %v error: %v", reflect.TypeOf(signal), err)
 				return
 			}
 		case signal := <-c.lastSignal: // 最后一个通知消息
 			data, ok := signal.([]byte)
 			if !ok {
-				c.logger.ErrorF("write message %v error: msg is not bytes", reflect.TypeOf(signal))
+				logger.Error("write message %v error: msg is not bytes", reflect.TypeOf(signal))
 				return
 			}
 			err := c.msgParser.Write(c, data...)
 			if err != nil {
-				c.logger.ErrorF("write message %v error: %v", reflect.TypeOf(signal), err)
+				logger.Error("write message %v error: %v", reflect.TypeOf(signal), err)
 				return
 			}
 			time.Sleep(2 * time.Second)
@@ -164,7 +157,7 @@ func (c *TcpConnX) HandleWrite() {
 	}
 }
 
-func (c *TcpConnX) AsyncSend(msgID uint16, msg interface{}) bool {
+func (c *TcpSession) AsyncSend(msgID uint16, msg interface{}) bool {
 
 	if c.IsShutdown() {
 		return false
@@ -172,40 +165,40 @@ func (c *TcpConnX) AsyncSend(msgID uint16, msg interface{}) bool {
 
 	data, err := c.msgParser.Pack(msgID, msg)
 	if err != nil {
-		c.logger.ErrorF("[AsyncSend] Pack msgID:%v and msg to bytes error:%v", msgID, err)
+		logger.Error("[AsyncSend] Pack msgID:%v and msg to bytes error:%v", msgID, err)
 		return false
 	}
 
 	if uint32(len(data)) > c.msgParser.maxMsgLen {
-		c.logger.ErrorF("[AsyncSend] 发送的消息包体过长 msgID:%v", msgID)
+		logger.Error("[AsyncSend] 发送的消息包体过长 msgID:%v", msgID)
 		return false
 	}
 
 	err = c.Signal(data)
 	if err != nil {
 		c.Close()
-		c.logger.ErrorF("%v", err)
+		logger.Error("%v", err)
 		return false
 	}
 
 	return true
 }
 
-func (c *TcpConnX) AsyncSendRowMsg(data []byte) bool {
+func (c *TcpSession) AsyncSendRowMsg(data []byte) bool {
 
 	if c.IsShutdown() {
 		return false
 	}
 
 	if uint32(len(data)) > c.msgParser.maxMsgLen {
-		c.logger.ErrorF("[AsyncSendRowMsg] 发送的消息包体过长 AsyncSendRowMsg")
+		logger.Error("[AsyncSendRowMsg] 发送的消息包体过长 AsyncSendRowMsg")
 		return false
 	}
 
 	err := c.Signal(data)
 	if err != nil {
 		c.Close()
-		c.logger.ErrorF("%v", err)
+		logger.Error("%v", err)
 		return false
 	}
 
@@ -213,29 +206,29 @@ func (c *TcpConnX) AsyncSendRowMsg(data []byte) bool {
 }
 
 // AsyncSendLastPacket 缓存在发送队列里等待发送goroutine取出 (发送最后一个消息 发送会关闭tcp连接 终止tcp goroutine)
-func (c *TcpConnX) AsyncSendLastPacket(msgID uint16, msg interface{}) bool {
+func (c *TcpSession) AsyncSendLastPacket(msgID uint16, msg interface{}) bool {
 	data, err := c.msgParser.Pack(msgID, msg)
 	if err != nil {
-		c.logger.ErrorF("[AsyncSendLastPacket] Pack msgID:%v and msg to bytes error:%v", msgID, err)
+		logger.Error("[AsyncSendLastPacket] Pack msgID:%v and msg to bytes error:%v", msgID, err)
 		return false
 	}
 
 	if uint32(len(data)) > c.msgParser.maxMsgLen {
-		c.logger.ErrorF("[AsyncSendLastPacket] 发送的消息包体过长 msgID:%v", msgID)
+		logger.Error("[AsyncSendLastPacket] 发送的消息包体过长 msgID:%v", msgID)
 		return false
 	}
 
 	err = c.LastSignal(data)
 	if err != nil {
 		c.Close()
-		c.logger.ErrorF("%v", err)
+		logger.Error("%v", err)
 		return false
 	}
 
 	return true
 }
 
-func (c *TcpConnX) Signal(signal []byte) error {
+func (c *TcpSession) Signal(signal []byte) error {
 	select {
 	case c.signal <- signal:
 		return nil
@@ -247,7 +240,7 @@ func (c *TcpConnX) Signal(signal []byte) error {
 	}
 }
 
-func (c *TcpConnX) LastSignal(signal []byte) error {
+func (c *TcpSession) LastSignal(signal []byte) error {
 	select {
 	case c.lastSignal <- signal:
 		return nil
@@ -259,46 +252,46 @@ func (c *TcpConnX) LastSignal(signal []byte) error {
 	}
 }
 
-func (c *TcpConnX) Verified() bool {
+func (c *TcpSession) Verified() bool {
 	return atomic.LoadInt32(&c.verify) != 0
 }
 
-func (c *TcpConnX) Verify() {
+func (c *TcpSession) Verify() {
 	atomic.CompareAndSwapInt32(&c.verify, 0, 1)
 }
 
-func (c *TcpConnX) IsClosed() bool {
+func (c *TcpSession) IsClosed() bool {
 	return atomic.LoadInt32(&c.closed) != 0
 }
 
-func (c *TcpConnX) IsShutdown() bool {
+func (c *TcpSession) IsShutdown() bool {
 	return atomic.LoadInt32(&c.closed) == 1
 }
 
-func (c *TcpConnX) Close() {
+func (c *TcpSession) Close() {
 	if atomic.CompareAndSwapInt32(&c.closed, 0, 1) {
 		c.Conn.Close()
 		close(c.stopped)
 	}
 }
 
-func (c *TcpConnX) Read(b []byte) (int, error) {
+func (c *TcpSession) Read(b []byte) (int, error) {
 	return c.Conn.Read(b)
 }
 
-func (c *TcpConnX) Write(b []byte) (int, error) {
+func (c *TcpSession) Write(b []byte) (int, error) {
 	return c.Conn.Write(b)
 }
 
-func (c *TcpConnX) LocalAddr() net.Addr {
+func (c *TcpSession) LocalAddr() net.Addr {
 	return c.Conn.LocalAddr()
 }
 
-func (c *TcpConnX) RemoteAddr() net.Addr {
+func (c *TcpSession) RemoteAddr() net.Addr {
 	return c.Conn.RemoteAddr()
 }
 
-func (c *TcpConnX) Reset() {
+func (c *TcpSession) Reset() {
 	if atomic.LoadInt32(&c.closed) == -1 {
 		return
 	}
@@ -311,10 +304,10 @@ func (c *TcpConnX) Reset() {
 }
 
 // OnConnect ...
-func (c *TcpConnX) OnConnect() {
-	c.logger.DebugF("[OnConnect] 建立连接 local:%s remote:%s", c.LocalAddr(), c.RemoteAddr())
+func (c *TcpSession) OnConnect() {
+	logger.Error("[OnConnect] 建立连接 local:%s remote:%s", c.LocalAddr(), c.RemoteAddr())
 }
 
-func (c *TcpConnX) OnClose() {
-	c.logger.InfoF("[OnConnect] 断开连接 local:%s remote:%s", c.LocalAddr(), c.RemoteAddr())
+func (c *TcpSession) OnClose() {
+	logger.Error("[OnConnect] 断开连接 local:%s remote:%s", c.LocalAddr(), c.RemoteAddr())
 }

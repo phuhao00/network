@@ -2,13 +2,14 @@ package network
 
 import (
 	"github.com/phuhao00/spoor"
+	"github.com/phuhao00/spoor/logger"
 	"net"
 	"runtime/debug"
 	"sync/atomic"
 )
 
-type Client struct {
-	*TcpConnX
+type TcpClient struct {
+	*TcpSession
 	Address         string
 	ChMsg           chan *Message
 	OnMessageCb     func(message *Packet)
@@ -19,18 +20,18 @@ type Client struct {
 	closed          int32
 }
 
-func NewClient(address string, connBuffSize int, logger *spoor.Spoor) *Client {
-	client := &Client{
+func NewClient(address string, connBuffSize int, logger *spoor.Spoor) *TcpClient {
+	client := &TcpClient{
 		bufferSize: connBuffSize,
 		Address:    address,
 		logger:     logger,
-		TcpConnX:   nil,
+		TcpSession: nil,
 	}
 	client.running.Store(false)
 	return client
 }
 
-func (c *Client) Dial() (*net.TCPConn, error) {
+func (c *TcpClient) Dial() (*net.TCPConn, error) {
 	tcpAddr, err := net.ResolveTCPAddr("tcp4", c.Address)
 
 	if err != nil {
@@ -46,39 +47,39 @@ func (c *Client) Dial() (*net.TCPConn, error) {
 	return conn, nil
 }
 
-func (c *Client) Run() {
+func (c *TcpClient) Run() {
 	conn, err := c.Dial()
 	if err != nil {
-		c.logger.ErrorF("%v", err)
+		logger.Error("%v", err)
 		return
 	}
-	tcpConnX, err := NewTcpConnX(conn, c.bufferSize, c.logger)
+	tcpSession, err := NewTcpSession(conn, c.bufferSize, c.logger)
 	if err != nil {
-		c.logger.ErrorF("%v", err)
+		logger.Error("%v", err)
 		return
 	}
-	c.TcpConnX = tcpConnX
+	c.TcpSession = tcpSession
 	c.Impl = c
 	c.Reset()
 	c.running.Store(true)
 	go c.Connect()
 }
 
-func (c *Client) OnClose() {
+func (c *TcpClient) OnClose() {
 	if c.OnCloseCallBack != nil {
 		c.OnCloseCallBack()
 	}
 	c.running.Store(false)
-	c.TcpConnX.OnClose()
+	c.TcpSession.OnClose()
 }
 
-func (c *Client) OnMessage(data *Message, conn *TcpConnX) {
+func (c *TcpClient) OnMessage(data *Message, conn *TcpSession) {
 
 	c.Verify()
 
 	defer func() {
 		if err := recover(); err != nil {
-			c.logger.ErrorF("[OnMessage] panic ", err, "\n", string(debug.Stack()))
+			logger.Error("[OnMessage] panic ", err, "\n", string(debug.Stack()))
 		}
 	}()
 
@@ -89,9 +90,12 @@ func (c *Client) OnMessage(data *Message, conn *TcpConnX) {
 }
 
 // Close 关闭连接
-func (c *Client) Close() {
+func (c *TcpClient) Close() {
 	if atomic.CompareAndSwapInt32(&c.closed, 0, 1) {
-		c.Conn.Close()
+		err := c.Conn.Close()
+		if err != nil {
+			logger.Error("")
+		}
 		close(c.stopped)
 	}
 }

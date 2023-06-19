@@ -30,7 +30,7 @@ func (p *NormalPacker) Pack(msgID uint16, msg interface{}) ([]byte, error) {
 	return buffer, nil
 }
 
-func (p *NormalPacker) Read(conn *TcpConnX) ([]byte, error) {
+func (p *NormalPacker) Read(conn *TcpSession) ([]byte, error) {
 	err := conn.Conn.(*net.TCPConn).SetReadDeadline(time.Now().Add(time.Second * 10))
 	if err != nil {
 		return nil, err

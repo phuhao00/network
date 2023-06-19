@@ -27,9 +27,9 @@ func OnClientMessage(packet *network.Packet) {
 	})
 }
 
-func Tick(c *network.Client) {
+func Tick(c *network.TcpClient) {
 
-	c.TcpConnX.AsyncSend(3, &player.ChatMessage{
+	c.TcpSession.AsyncSend(3, &player.ChatMessage{
 		Content: "abd",
 		Extra:   nil,
 	})
