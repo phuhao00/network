@@ -157,7 +157,7 @@ func (c *TcpSession) HandleWrite() {
 	}
 }
 
-func (c *TcpSession) AsyncSend(msgID uint16, msg interface{}) bool {
+func (c *TcpSession) AsyncSend(msgID uint64, msg interface{}) bool {
 
 	if c.IsShutdown() {
 		return false
@@ -206,7 +206,7 @@ func (c *TcpSession) AsyncSendRowMsg(data []byte) bool {
 }
 
 // AsyncSendLastPacket 缓存在发送队列里等待发送goroutine取出 (发送最后一个消息 发送会关闭tcp连接 终止tcp goroutine)
-func (c *TcpSession) AsyncSendLastPacket(msgID uint16, msg interface{}) bool {
+func (c *TcpSession) AsyncSendLastPacket(msgID uint64, msg interface{}) bool {
 	data, err := c.msgParser.Pack(msgID, msg)
 	if err != nil {
 		logger.Error("[AsyncSendLastPacket] Pack msgID:%v and msg to bytes error:%v", msgID, err)

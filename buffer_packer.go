@@ -143,7 +143,7 @@ func (p *BufferPacker) reset() {
 	p.sendBuff = NewByteBuffer()
 }
 
-func (p *BufferPacker) Pack(msgID uint16, msg interface{}) ([]byte, error) {
+func (p *BufferPacker) Pack(msgID uint64, msg interface{}) ([]byte, error) {
 	pbMsg, ok := msg.(proto.Message)
 	if !ok {
 		return []byte{}, fmt.Errorf("msg is not protobuf message")
@@ -157,10 +157,10 @@ func (p *BufferPacker) Pack(msgID uint16, msg interface{}) ([]byte, error) {
 	buf := make([]byte, 4+len(data))
 	if p.byteOrder == binary.LittleEndian {
 		binary.LittleEndian.PutUint16(buf[0:2], 0)
-		binary.LittleEndian.PutUint16(buf[2:], msgID)
+		binary.LittleEndian.PutUint64(buf[2:], msgID)
 	} else {
 		binary.BigEndian.PutUint16(buf[0:2], 0)
-		binary.BigEndian.PutUint16(buf[2:], msgID)
+		binary.BigEndian.PutUint64(buf[2:], msgID)
 	}
 	copy(buf[4:], data)
 	return buf, err
