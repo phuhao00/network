@@ -104,17 +104,17 @@ func (s *TcpServer) Run() {
 			logger.Info("[Run] too many connections %v", atomic.LoadInt64(&s.counter))
 			continue
 		}
-		tcpConnX, err := NewTcpSession(conn, s.connBuffSize, s.logger)
+		tcpSession, err := NewTcpSession(conn, s.connBuffSize, s.logger)
 		if err != nil {
 			logger.Error("[Run] err:%v", err)
 			return
 		}
-		s.addConn(conn, tcpConnX)
-		tcpConnX.Impl = s
+		s.addConn(conn, tcpSession)
+		tcpSession.Impl = s
 		s.wgConn.Add(1)
 		go func() {
-			tcpConnX.Connect()
-			s.removeConn(conn, tcpConnX)
+			tcpSession.Connect()
+			s.removeConn(conn, tcpSession)
 			s.wgConn.Done()
 		}()
 	}

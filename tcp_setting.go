@@ -9,8 +9,6 @@ type TCPKeepAliveListener struct {
 	*net.TCPListener
 }
 
-// Accept accepts the next incoming call and returns the new
-// connection. KeepAlivePeriod is set properly.
 func (ln TCPKeepAliveListener) Accept() (c net.Conn, err error) {
 	tc, err := ln.AcceptTCP()
 	if err != nil {

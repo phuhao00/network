@@ -10,22 +10,22 @@ import (
 )
 
 type BufferPacker struct {
-	lenMsgLen int32
-	minMsgLen uint32
-	maxMsgLen uint32
-	recvBuff  *ByteBuffer
-	sendBuff  *ByteBuffer
-	byteOrder binary.ByteOrder
+	lenMsgLen   int32
+	minMsgLen   uint32
+	maxMsgLen   uint32
+	receiveBuff *ByteBuffer
+	sendBuff    *ByteBuffer
+	byteOrder   binary.ByteOrder
 }
 
 func newInActionPacker() *BufferPacker {
 	msgParser := &BufferPacker{
-		lenMsgLen: 4,
-		minMsgLen: 2,
-		maxMsgLen: 2 * 1024 * 1024,
-		recvBuff:  NewByteBuffer(),
-		sendBuff:  NewByteBuffer(),
-		byteOrder: binary.LittleEndian,
+		lenMsgLen:   4,
+		minMsgLen:   2,
+		maxMsgLen:   2 * 1024 * 1024,
+		receiveBuff: NewByteBuffer(),
+		sendBuff:    NewByteBuffer(),
+		byteOrder:   binary.LittleEndian,
 	}
 	return msgParser
 }
@@ -62,22 +62,22 @@ func (p *BufferPacker) SetMsgLen(lenMsgLen int32, minMsgLen uint32, maxMsgLen ui
 // Read goroutine safe
 func (p *BufferPacker) Read(conn *TcpSession) ([]byte, error) {
 
-	p.recvBuff.EnsureWritableBytes(p.lenMsgLen)
+	p.receiveBuff.EnsureWritableBytes(p.lenMsgLen)
 
-	readLen, err := io.ReadFull(conn, p.recvBuff.WriteBuff()[:p.lenMsgLen])
+	readLen, err := io.ReadFull(conn, p.receiveBuff.WriteBuff()[:p.lenMsgLen])
 	// read len
 	if err != nil {
 		return nil, fmt.Errorf("%v readLen:%v", err, readLen)
 	}
-	p.recvBuff.WriteBytes(int32(readLen))
+	p.receiveBuff.WriteBytes(int32(readLen))
 
 	// parse len
 	var msgLen uint32
 	switch p.lenMsgLen {
 	case 2:
-		msgLen = uint32(p.recvBuff.ReadInt16())
+		msgLen = uint32(p.receiveBuff.ReadInt16())
 	case 4:
-		msgLen = uint32(p.recvBuff.ReadInt32())
+		msgLen = uint32(p.receiveBuff.ReadInt32())
 	}
 
 	// check len
@@ -87,23 +87,23 @@ func (p *BufferPacker) Read(conn *TcpSession) ([]byte, error) {
 		return nil, errors.New("message too short")
 	}
 
-	p.recvBuff.EnsureWritableBytes(int32(msgLen))
+	p.receiveBuff.EnsureWritableBytes(int32(msgLen))
 
-	rLen, err := io.ReadFull(conn, p.recvBuff.WriteBuff()[:msgLen])
+	rLen, err := io.ReadFull(conn, p.receiveBuff.WriteBuff()[:msgLen])
 	if err != nil {
 		return nil, fmt.Errorf("%v msgLen:%v readLen:%v", err, msgLen, rLen)
 	}
-	p.recvBuff.WriteBytes(int32(rLen))
+	p.receiveBuff.WriteBytes(int32(rLen))
 
 	/*
 		// 保留了2字节flag 暂时未处理
 		var flag uint16
-		flag = uint16(p.recvBuff.ReadInt16())
+		flag = uint16(p.receiveBuff.ReadInt16())
 	*/
-	p.recvBuff.Skip(2) // 跳过2字节保留字段
+	p.receiveBuff.Skip(2) // 跳过2字节保留字段
 
 	// 减去2字节的保留字段长度
-	return p.recvBuff.NextBytes(int32(msgLen - 2)), nil
+	return p.receiveBuff.NextBytes(int32(msgLen - 2)), nil
 
 }
 
@@ -139,7 +139,7 @@ func (p *BufferPacker) Write(conn *TcpSession, buff ...byte) error {
 }
 
 func (p *BufferPacker) reset() {
-	p.recvBuff = NewByteBuffer()
+	p.receiveBuff = NewByteBuffer()
 	p.sendBuff = NewByteBuffer()
 }
 

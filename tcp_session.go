@@ -78,7 +78,6 @@ func (c *TcpSession) Connect() {
 L:
 	for {
 		select {
-		// 等待通到返回 返回后检查连接是否验证完成 如果没有验证 则关闭连接
 		case <-timeout.C:
 			if !c.Verified() {
 				logger.Error("[Connect] 验证超时 ip addr %s", c.RemoteAddr())
