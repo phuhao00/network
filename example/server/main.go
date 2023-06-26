@@ -9,7 +9,7 @@ import (
 )
 
 func main() {
-	server := network.NewServer(":8023", 100, 200, logger.Logger)
+	server := network.NewTcpServer(":8023", 100, 200, logger.Logger)
 	server.MessageHandler = OnMessage
 	go server.Run()
 	select {}

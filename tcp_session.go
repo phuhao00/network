@@ -19,7 +19,7 @@ const timeoutTime = 30 // 连接通过验证的超时时间
 
 type TcpSession struct {
 	Conn        net.Conn
-	Impl        IService
+	Impl        ISession
 	ConnID      int64
 	verify      int32
 	closed      int32

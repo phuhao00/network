@@ -1,6 +1,6 @@
 package network
 
-type IService interface {
+type ISession interface {
 	OnConnect()
 	OnClose()
 	OnMessage(*Message, *TcpSession)

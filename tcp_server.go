@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-type Server struct {
+type TcpServer struct {
 	pid            int64
 	Addr           string
 	MaxConnNum     int
@@ -27,8 +27,8 @@ type Server struct {
 	MessageHandler func(packet *Packet)
 }
 
-func NewServer(addr string, maxConnNum int, buffSize int, logger *spoor.Spoor) *Server {
-	s := &Server{
+func NewTcpServer(addr string, maxConnNum int, buffSize int, logger *spoor.Spoor) *TcpServer {
+	s := &TcpServer{
 		Addr:         addr,
 		MaxConnNum:   maxConnNum,
 		connBuffSize: buffSize,
@@ -38,11 +38,11 @@ func NewServer(addr string, maxConnNum int, buffSize int, logger *spoor.Spoor) *
 	return s
 }
 
-func (s *Server) Init() {
+func (s *TcpServer) Init() {
 	tcpAddr, err := net.ResolveTCPAddr("tcp4", s.Addr)
 
 	if err != nil {
-		logger.Fatal("[net] addr resolve error", tcpAddr, err)
+		logger.Fatal("[Init] addr resolve error", tcpAddr, err)
 	}
 
 	ln, err := net.ListenTCP("tcp6", tcpAddr)
@@ -53,7 +53,7 @@ func (s *Server) Init() {
 
 	if s.MaxConnNum <= 0 {
 		s.MaxConnNum = 100
-		logger.Info("invalid MaxConnNum, reset to %v", s.MaxConnNum)
+		logger.Info("[Init] invalid MaxConnNum, reset to %v", s.MaxConnNum)
 	}
 
 	s.ln = ln
@@ -61,13 +61,13 @@ func (s *Server) Init() {
 	s.counter = 1
 	s.idCounter = 1
 	s.pid = int64(os.Getpid())
-	logger.Info("Server Listen %s", s.ln.Addr().String())
+	logger.Info("[Init] TcpServer Listen %s", s.ln.Addr().String())
 }
 
-func (s *Server) Run() {
+func (s *TcpServer) Run() {
 	defer func() {
 		if err := recover(); err != nil {
-			logger.Error("[net] panic", err, "\n", string(debug.Stack()))
+			logger.Error("[Run] panic", err, "\n", string(debug.Stack()))
 		}
 	}()
 
@@ -88,7 +88,7 @@ func (s *Server) Run() {
 				if max := 1 * time.Second; tempDelay > max {
 					tempDelay = max
 				}
-				logger.Info("accept error: %v; retrying in %v", err, tempDelay)
+				logger.Info("[Run]accept error: %v; retrying in %v", err, tempDelay)
 				time.Sleep(tempDelay)
 				continue
 			}
@@ -97,13 +97,16 @@ func (s *Server) Run() {
 		tempDelay = 0
 
 		if atomic.LoadInt64(&s.counter) >= int64(s.MaxConnNum) {
-			conn.Close()
-			logger.Info("too many connections %v", atomic.LoadInt64(&s.counter))
+			err = conn.Close()
+			if err != nil {
+				logger.Error("[Run] err:%v", err.Error())
+			}
+			logger.Info("[Run] too many connections %v", atomic.LoadInt64(&s.counter))
 			continue
 		}
 		tcpConnX, err := NewTcpSession(conn, s.connBuffSize, s.logger)
 		if err != nil {
-			logger.Error("%v", err)
+			logger.Error("[Run] err:%v", err)
 			return
 		}
 		s.addConn(conn, tcpConnX)
@@ -117,20 +120,26 @@ func (s *Server) Run() {
 	}
 }
 
-func (s *Server) Close() {
-	s.ln.Close()
+func (s *TcpServer) Close() {
+	err := s.ln.Close()
+	if err != nil {
+		logger.Error(err.Error())
+	}
 	s.wgLn.Wait()
 
 	s.mutexConn.Lock()
 	for conn := range s.connSet {
-		conn.Close()
+		err = conn.Close()
+		if err != nil {
+			logger.Error(err.Error())
+		}
 	}
 	s.connSet = nil
 	s.mutexConn.Unlock()
 	s.wgConn.Wait()
 }
 
-func (s *Server) addConn(conn net.Conn, tcpSession *TcpSession) {
+func (s *TcpServer) addConn(conn net.Conn, tcpSession *TcpSession) {
 	s.mutexConn.Lock()
 	atomic.AddInt64(&s.counter, 1)
 	s.connSet[conn] = conn
@@ -142,7 +151,7 @@ func (s *Server) addConn(conn net.Conn, tcpSession *TcpSession) {
 	tcpSession.OnConnect()
 }
 
-func (s *Server) removeConn(conn net.Conn, tcpConn *TcpSession) {
+func (s *TcpServer) removeConn(conn net.Conn, tcpConn *TcpSession) {
 	tcpConn.Close()
 	s.mutexConn.Lock()
 	atomic.AddInt64(&s.counter, -1)
@@ -150,17 +159,17 @@ func (s *Server) removeConn(conn net.Conn, tcpConn *TcpSession) {
 	s.mutexConn.Unlock()
 }
 
-func (s *Server) OnMessage(message *Message, conn *TcpSession) {
+func (s *TcpServer) OnMessage(message *Message, conn *TcpSession) {
 	s.MessageHandler(&Packet{
 		Msg:  message,
 		Conn: conn,
 	})
 }
 
-func (s *Server) OnClose() {
+func (s *TcpServer) OnClose() {
 
 }
 
-func (s *Server) OnConnect() {
+func (s *TcpServer) OnConnect() {
 
 }
