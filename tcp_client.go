@@ -99,3 +99,7 @@ func (c *TcpClient) Close() {
 		close(c.stopped)
 	}
 }
+
+func (c *TcpClient) IsRunning() bool {
+	return c.running.Load().(bool)
+}
